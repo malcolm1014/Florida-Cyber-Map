@@ -135,6 +135,37 @@
   .chip[aria-pressed="false"] .dot{ background:transparent; box-shadow:inset 0 0 0 1.5px var(--cc); }
   .chip:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
 
+  /* Upcoming digest */
+  .uprow{
+    display:grid; grid-template-columns:52px 1fr; gap:10px; align-items:baseline;
+    width:100%; text-align:left; cursor:pointer; color:var(--text);
+    background:none; border:none; font-family:var(--sans);
+    padding:4px 0; transition:opacity .15s ease;
+  }
+  .uprow:hover{ opacity:.75; }
+  .uprow:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .uprow .d{ font-family:var(--mono); font-size:.62rem; color:var(--accent); white-space:nowrap; }
+  .uprow .n{ font-size:.75rem; font-weight:500; line-height:1.35; }
+
+  /* Near-me button + user dot */
+  #nearme{
+    margin-top:8px; display:inline-flex; align-items:center; gap:6px; cursor:pointer;
+    font-family:var(--mono); font-size:.66rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); background:var(--glass-2); border:1px solid var(--line);
+    border-radius:999px; padding:5px 12px; transition:color .15s ease, border-color .15s ease;
+  }
+  #nearme:hover{ color:var(--text); }
+  #nearme[aria-pressed="true"]{ color:var(--accent); border-color:var(--accent); }
+  #nearme:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .you{
+    width:14px; height:14px; border-radius:50%; background:var(--accent);
+    border:2px solid rgba(233,241,252,.95);
+    box-shadow:0 0 0 4px rgba(62,224,143,.25), 0 0 14px 2px rgba(62,224,143,.5);
+    animation:youpulse 1.6s ease-in-out infinite;
+  }
+  @keyframes youpulse{ 50%{ box-shadow:0 0 0 8px rgba(62,224,143,.12), 0 0 14px 2px rgba(62,224,143,.5); } }
+  .stale{ color:#D9A24A; }
+
   /* Search */
   .searchwrap{ position:relative; }
   .searchwrap::before{
@@ -248,6 +279,11 @@
     <div class="status"><b id="statusText">ALL SECTORS</b> · <span id="visCount"></span> NODES<span class="cursor"></span></div>
   </header>
 
+  <div class="pad hairline" id="upwrap" style="display:none">
+    <div class="label">Upcoming</div>
+    <div id="upcoming"></div>
+  </div>
+
   <div class="pad hairline">
     <div class="label">Sectors</div>
     <div class="sectors" id="sectors"></div>
@@ -262,6 +298,7 @@
     <div class="searchwrap">
       <input id="search" type="search" placeholder="Search by name or city…" aria-label="Search resources">
     </div>
+    <button id="nearme" aria-pressed="false" title="Sort the list by distance from your location">◎ Near me</button>
   </div>
 
   <div id="list"></div>
@@ -297,6 +334,15 @@ const CATEGORIES = {
 
 function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function parseISO(s){ return new Date(s + "T12:00:00"); }
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+function isPast(r){ return r.next && parseISO(r.next) < TODAY; }
+function milesTo(a, b){
+  const R = 3958.8, toR = d => d * Math.PI / 180;
+  const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
 
 /* ============ MAP SETUP ============ */
 const map = L.map('map', { zoomControl:false }).setView([27.8, -83.0], 7);
@@ -358,7 +404,7 @@ const markers = RESOURCES.map(r => {
   const facts = [];
   if (r.address) facts.push(`<div class="fact"><span class="fk">LOC</span><span>${esc(r.address)}</span></div>`);
   if (r.phone)   facts.push(`<div class="fact"><span class="fk">TEL</span><a href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">${esc(r.phone)}</a></div>`);
-  if (r.when)    facts.push(`<div class="fact"><span class="fk">TIME</span><span>${esc(r.when)}</span></div>`);
+  if (r.when)    facts.push(`<div class="fact"><span class="fk">TIME</span><span>${esc(r.when)}${isPast(r) ? ' <span class="stale">· listed dates have passed — check site</span>' : ''}</span></div>`);
   m.bindPopup(`
     <div class="popup">
       <h3>${esc(r.name)}</h3>
@@ -385,17 +431,20 @@ function visible(r){
 function refresh(){
   const list = document.getElementById('list');
   list.innerHTML = "";
-  const shown = markers.filter(m => visible(m._data));
+  let shown = markers.filter(m => visible(m._data));
   clusters.clearLayers();
   clusters.addLayers(shown);
+  if (userLoc) shown = shown.slice().sort((a, b) =>
+    milesTo(userLoc, a._data) - milesTo(userLoc, b._data));
   shown.forEach(m => {
     const r = m._data, cat = CATEGORIES[r.category];
+    const dist = userLoc ? Math.round(milesTo(userLoc, r)) + " mi · " : "";
     const el = document.createElement('button');
     el.className = 'item';
     el.innerHTML = `<span class="dot" style="background:${cat.color}"></span>
                     <span><span class="t">${esc(r.name)}</span>
-                    <span class="m" style="display:block">${esc(r.city)} · ${cat.label}</span></span>`;
-    el.onclick = () => clusters.zoomToShowLayer(m, () => m.openPopup());
+                    <span class="m" style="display:block">${dist}${esc(r.city)} · ${cat.label}</span></span>`;
+    el.onclick = () => revealMarker(m);
     list.appendChild(el);
   });
   document.getElementById('empty').style.display = shown.length ? 'none' : 'block';
@@ -449,6 +498,65 @@ document.getElementById('search').addEventListener('input', e => {
   searchTerm = e.target.value.trim().toLowerCase();
   refresh();
 });
+
+/* Reveal a marker even if it's clustered (or filtered out) */
+function revealMarker(m){
+  if (clusters.hasLayer(m)){
+    clusters.zoomToShowLayer(m, () => m.openPopup());
+  } else {
+    map.flyTo([m._data.lat, m._data.lng], 12, {duration:.8});
+    L.popup({ maxWidth:320 }).setLatLng([m._data.lat, m._data.lng])
+      .setContent(m.getPopup().getContent()).openOn(map);
+  }
+}
+
+/* ============ UPCOMING DIGEST (dated events, soonest first) ============ */
+const upcoming = RESOURCES
+  .filter(r => r.next && !isPast(r))
+  .sort((a, b) => a.next.localeCompare(b.next));
+if (upcoming.length){
+  document.getElementById('upwrap').style.display = '';
+  const upEl = document.getElementById('upcoming');
+  upcoming.forEach(r => {
+    const d = parseISO(r.next);
+    const yr = d.getFullYear() !== TODAY.getFullYear() ? " ’" + String(d.getFullYear()).slice(2) : "";
+    const el = document.createElement('button');
+    el.className = 'uprow';
+    el.innerHTML = `<span class="d">${d.toLocaleDateString('en-US', {month:'short', day:'numeric'})}${yr}</span>
+                    <span class="n">${esc(r.name)}</span>`;
+    el.onclick = () => { const m = markers.find(x => x._data === r); if (m) revealMarker(m); };
+    upEl.appendChild(el);
+  });
+}
+
+/* ============ NEAR ME (geolocation → distance sort) ============ */
+let userLoc = null, userMarker = null;
+const nearBtn = document.getElementById('nearme');
+nearBtn.onclick = () => {
+  if (userLoc){
+    userLoc = null;
+    nearBtn.setAttribute('aria-pressed', 'false');
+    if (userMarker){ map.removeLayer(userMarker); userMarker = null; }
+    refresh();
+    return;
+  }
+  if (!navigator.geolocation){ nearBtn.textContent = "◎ location unavailable"; return; }
+  nearBtn.textContent = "◎ locating…";
+  navigator.geolocation.getCurrentPosition(pos => {
+    userLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    nearBtn.setAttribute('aria-pressed', 'true');
+    nearBtn.textContent = "◎ Near me — on";
+    userMarker = L.marker([userLoc.lat, userLoc.lng], {
+      icon: L.divIcon({ className:'', iconSize:[18,18], iconAnchor:[9,9], html:'<div class="you"></div>' }),
+      interactive: false
+    }).addTo(map);
+    map.flyTo([userLoc.lat, userLoc.lng], 9, {duration:.8});
+    refresh();
+  }, () => {
+    nearBtn.textContent = "◎ location blocked";
+    setTimeout(() => { nearBtn.textContent = "◎ Near me"; }, 2500);
+  }, { timeout: 10000 });
+};
 
 refresh();
 </script>
