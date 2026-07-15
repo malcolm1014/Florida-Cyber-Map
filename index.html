@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Interactive map of local cybersecurity resources across four Florida regions — conferences, meetups, hackerspaces, Linux groups, youth programs, schools, and libraries.">
+<meta name="description" content="Interactive map of local cybersecurity resources across four Florida regions — conferences, meetups, hackerspaces, Linux groups, youth programs, APEX Accelerators, schools, and libraries.">
 <title>Florida Cyber Resource Map</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
 
-<!-- Leaflet from CDN — no build tools, no API keys -->
+<!-- Leaflet + markercluster from CDN — no build tools, no API keys -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -34,11 +36,13 @@
     /* Category colors — validated as a set for the dark surface */
     --c-school:  #3987e5;
     --c-library: #199e70;
-    --c-apex:    #c98500;
+    --c-youth:   #c98500;
     --c-linux:   #008300;
     --c-maker:   #9085e9;
     --c-con:     #e66767;
     --c-meetup:  #d55181;
+    --c-apex:    #d95926;
+    --c-gov:     #8195AB;  /* neutral "other" slot — deliberately outside the hue palette */
 
     --sans: 'Space Grotesk', system-ui, sans-serif;
     --mono: 'IBM Plex Mono', ui-monospace, monospace;
@@ -183,6 +187,19 @@
   .popup p{ font-size:.78rem; color:var(--muted); line-height:1.5; margin-bottom:7px; }
   .popup a{ color:var(--accent); font-size:.78rem; text-decoration:none; }
   .popup a:hover{ text-decoration:underline; }
+  .popup .facts{
+    border-top:1px solid var(--line); margin:2px 0 7px; padding-top:7px;
+    display:grid; gap:4px;
+  }
+  .popup .fact{
+    display:grid; grid-template-columns:38px 1fr; gap:8px;
+    font-size:.73rem; color:var(--text); line-height:1.45;
+  }
+  .popup .fk{
+    font-family:var(--mono); font-size:.58rem; font-weight:500; letter-spacing:.12em;
+    color:var(--accent); padding-top:2px;
+  }
+  .popup .fact a{ font-size:inherit; }
 
   /* ============ PINS ============ */
   .pin{
@@ -193,6 +210,18 @@
     transition:transform .15s ease;
   }
   .pin:hover{ transform:scale(1.35); }
+
+  /* Cluster bubbles — neutral glass, count in mono */
+  .cluster{
+    display:flex; align-items:center; justify-content:center;
+    border-radius:50%;
+    background:rgba(12,17,26,.85); backdrop-filter:blur(8px);
+    border:1.5px solid var(--accent);
+    color:var(--text); font-family:var(--mono); font-size:.72rem; font-weight:500;
+    box-shadow:0 0 0 4px rgba(62,224,143,.14), 0 4px 14px rgba(0,0,0,.45);
+    transition:transform .15s ease;
+  }
+  .cluster:hover{ transform:scale(1.12); }
 
   /* ============ MOBILE ============ */
   @media (max-width:760px){
@@ -241,37 +270,29 @@
   <footer>data sweep jul 2026 · locations approximate — verify before you go · © OpenStreetMap · CARTO</footer>
 </aside>
 
-<!-- Resource rows live in data.js — edit that file to add or fix entries. -->
+<!-- Resource rows live in data.js; county-accurate region borders in regions.js. -->
+<script src="regions.js"></script>
 <script src="data.js"></script>
 <script>
-/* ============ REGIONS (hand-traced coastline, simplified) ============ */
+/* ============ REGIONS (borders in regions.js — dissolved county lines) ============ */
 const REGIONS = {
-  1:{ name:"Panhandle / NW", color:getCSS('--r1'),
-      poly:[[31.00,-87.63],[30.38,-87.55],[30.28,-87.15],[30.35,-86.30],[30.30,-85.70],
-            [29.95,-85.40],[29.75,-84.90],[29.90,-84.35],[30.05,-84.00],[30.10,-83.60],
-            [30.65,-83.30],[31.00,-83.30]] },
-  2:{ name:"Northeast", color:getCSS('--r2'),
-      poly:[[31.00,-83.30],[30.65,-83.30],[30.10,-83.60],[29.90,-83.55],[29.55,-83.40],
-            [29.15,-83.05],[29.00,-82.95],[29.00,-80.85],[29.40,-81.10],[30.00,-81.30],
-            [30.70,-81.45],[30.75,-81.60]] },
-  3:{ name:"Central / I-4", color:getCSS('--r3'),
-      poly:[[29.00,-82.95],[28.60,-82.70],[28.00,-82.85],[27.60,-82.80],[27.00,-82.55],
-            [27.00,-80.15],[27.90,-80.40],[28.40,-80.55],[28.75,-80.70],[29.00,-80.85]] },
-  4:{ name:"South FL", color:getCSS('--r4'),
-      poly:[[27.00,-82.55],[26.70,-82.30],[26.45,-82.05],[25.90,-81.70],[25.55,-81.35],
-            [25.20,-81.15],[24.85,-81.80],[24.53,-81.95],[24.50,-81.30],[24.95,-80.55],
-            [25.35,-80.30],[25.75,-80.12],[26.40,-80.05],[26.95,-80.08],[27.00,-80.15]] },
+  1:{ name:"Panhandle / NW", color:getCSS('--r1') },
+  2:{ name:"Northeast",      color:getCSS('--r2') },
+  3:{ name:"Central / I-4",  color:getCSS('--r3') },
+  4:{ name:"South FL",       color:getCSS('--r4') },
 };
 
 /* Fixed display order — also the palette's validated adjacency order. */
 const CATEGORIES = {
   school: { label:"Schools & universities",     color:getCSS('--c-school')  },
   library:{ label:"Libraries",                  color:getCSS('--c-library') },
-  apex:   { label:"Youth programs",             color:getCSS('--c-apex')    },
+  youth:  { label:"Youth programs",             color:getCSS('--c-youth')   },
   linux:  { label:"Linux & FOSS",               color:getCSS('--c-linux')   },
   maker:  { label:"Hackerspaces & makerspaces", color:getCSS('--c-maker')   },
   con:    { label:"Conferences",                color:getCSS('--c-con')     },
-  meetup: { label:"Meetups & DEF CON groups",   color:getCSS('--c-meetup')  },
+  meetup: { label:"Meetups & associations",     color:getCSS('--c-meetup')  },
+  apex:   { label:"APEX Accelerators (GovCon)", color:getCSS('--c-apex')    },
+  gov:    { label:"Gov & defense",              color:getCSS('--c-gov')     },
 };
 
 function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
@@ -284,16 +305,17 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   attribution:'© OpenStreetMap contributors © CARTO', maxZoom:18
 }).addTo(map);
 
-/* Region polygons */
+/* Region polygons — county-accurate MultiPolygons from regions.js */
 const regionLayers = {};
 let activeRegion = null;
-for (const [id, r] of Object.entries(REGIONS)){
-  regionLayers[id] = L.polygon(r.poly, {
-    color:r.color, weight:1.4, opacity:.75, fillColor:r.color, fillOpacity:.05
+for (const f of REGION_GEO.features){
+  const id = f.properties.region, r = REGIONS[id];
+  regionLayers[id] = L.geoJSON(f, {
+    style:{ color:r.color, weight:1.4, opacity:.75, fillColor:r.color, fillOpacity:.05 }
   }).addTo(map)
-    .on('click', () => selectRegion(Number(id)))
+    .on('click', () => selectRegion(id))
     .on('mouseover', function(){ if (activeRegion === null) this.setStyle({ fillOpacity:.12 }); })
-    .on('mouseout',  function(){ this.setStyle({ fillOpacity: regionFill(Number(id)) }); });
+    .on('mouseout',  function(){ this.setStyle({ fillOpacity: regionFill(id) }); });
 }
 function regionFill(id){
   if (activeRegion === null) return .05;
@@ -306,6 +328,23 @@ function restyleRegions(){
   }
 }
 
+/* Marker clustering — declusters fully by zoom 12 */
+const clusters = L.markerClusterGroup({
+  maxClusterRadius: 42,
+  showCoverageOnHover: false,
+  spiderfyOnMaxZoom: true,
+  disableClusteringAtZoom: 12,
+  iconCreateFunction: c => {
+    const n = c.getChildCount();
+    const size = n < 10 ? 34 : n < 25 ? 40 : 46;
+    return L.divIcon({
+      className:'', iconSize:[size, size],
+      html:`<div class="cluster" style="width:${size}px;height:${size}px">${n}</div>`
+    });
+  }
+});
+map.addLayer(clusters);
+
 /* Markers */
 function makeIcon(color){
   return L.divIcon({
@@ -316,14 +355,19 @@ function makeIcon(color){
 const markers = RESOURCES.map(r => {
   const cat = CATEGORIES[r.category];
   const m = L.marker([r.lat, r.lng], { icon:makeIcon(cat.color) });
+  const facts = [];
+  if (r.address) facts.push(`<div class="fact"><span class="fk">LOC</span><span>${esc(r.address)}</span></div>`);
+  if (r.phone)   facts.push(`<div class="fact"><span class="fk">TEL</span><a href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">${esc(r.phone)}</a></div>`);
+  if (r.when)    facts.push(`<div class="fact"><span class="fk">TIME</span><span>${esc(r.when)}</span></div>`);
   m.bindPopup(`
     <div class="popup">
       <h3>${esc(r.name)}</h3>
       <span class="tag" style="color:${cat.color}; border-color:${cat.color}">${cat.label}</span>
       <span class="tag" style="color:${REGIONS[r.region].color}; border-color:${REGIONS[r.region].color}">${REGIONS[r.region].name}</span>
       <p>${esc(r.notes)}</p>
+      ${facts.length ? `<div class="facts">${facts.join("")}</div>` : ""}
       ${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">Website ↗</a>` : ""}
-    </div>`);
+    </div>`, { maxWidth: 320 });
   m._data = r;
   return m;
 });
@@ -339,27 +383,23 @@ function visible(r){
 }
 
 function refresh(){
-  let count = 0;
   const list = document.getElementById('list');
   list.innerHTML = "";
-  markers.forEach(m => {
-    const show = visible(m._data);
-    if (show && !map.hasLayer(m)) m.addTo(map);
-    if (!show && map.hasLayer(m)) map.removeLayer(m);
-    if (show){
-      count++;
-      const r = m._data, cat = CATEGORIES[r.category];
-      const el = document.createElement('button');
-      el.className = 'item';
-      el.innerHTML = `<span class="dot" style="background:${cat.color}"></span>
-                      <span><span class="t">${esc(r.name)}</span>
-                      <span class="m" style="display:block">${esc(r.city)} · ${cat.label}</span></span>`;
-      el.onclick = () => { map.flyTo([r.lat, r.lng], 12, {duration:.8}); m.openPopup(); };
-      list.appendChild(el);
-    }
+  const shown = markers.filter(m => visible(m._data));
+  clusters.clearLayers();
+  clusters.addLayers(shown);
+  shown.forEach(m => {
+    const r = m._data, cat = CATEGORIES[r.category];
+    const el = document.createElement('button');
+    el.className = 'item';
+    el.innerHTML = `<span class="dot" style="background:${cat.color}"></span>
+                    <span><span class="t">${esc(r.name)}</span>
+                    <span class="m" style="display:block">${esc(r.city)} · ${cat.label}</span></span>`;
+    el.onclick = () => clusters.zoomToShowLayer(m, () => m.openPopup());
+    list.appendChild(el);
   });
-  document.getElementById('empty').style.display = count ? 'none' : 'block';
-  document.getElementById('visCount').textContent = count;
+  document.getElementById('empty').style.display = shown.length ? 'none' : 'block';
+  document.getElementById('visCount').textContent = shown.length;
   document.getElementById('statusText').textContent =
     activeRegion ? REGIONS[activeRegion].name.toUpperCase() : "ALL SECTORS";
 }
